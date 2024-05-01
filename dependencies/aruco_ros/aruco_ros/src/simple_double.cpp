@@ -38,6 +38,7 @@ or implied, of Rafael Muñoz Salinas.
 #include <aruco/aruco.h>
 #include <aruco/cvdrawingutils.h>
 
+#include <opencv2/core/core.hpp>
 #include <ros/ros.h>
 #include <image_transport/image_transport.h>
 #include <cv_bridge/cv_bridge.h>
@@ -152,7 +153,7 @@ void image_callback(const sensor_msgs::ImageConstPtr& msg)
         //              //paint a circle in the mid point of the normalized coordinates of both markers
         //              cv::circle(inImage,
         //                         cv::Point((u[0]+u[1])/2, (v[0]+v[1])/2),
-        //                         3, cv::Scalar(0,0,255), cv::FILLED);
+        //                         3, cv::Scalar(0,0,255), CV_FILLED);
 
 
         //compute the midpoint in 3D:
@@ -175,12 +176,12 @@ void image_callback(const sensor_msgs::ImageConstPtr& msg)
         //paint a circle in the mid point of the normalized coordinates of both markers
         cv::circle(inImage,
                    cv::Point(u[0], v[0]),
-                   3, cv::Scalar(0,0,255), cv::FILLED);
+                   3, cv::Scalar(0,0,255), CV_FILLED);
 
       }
 
       //draw a 3d cube in each marker if there is 3d info
-      if(camParam.isValid() && marker_size>0)
+      if(camParam.isValid() && marker_size!=-1)
       {
         for(unsigned int i=0; i<markers.size(); ++i)
         {

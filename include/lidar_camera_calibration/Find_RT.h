@@ -5,13 +5,12 @@
 #include <iostream>
 #include <string>
 #include <sstream>
-#include <utility>
+#include <utility> 
 
 #include <Eigen/Dense>
 #include <Eigen/SVD>
 #include <Eigen/Geometry>
 #include <unsupported/Eigen/MatrixFunctions>
-
 using namespace Eigen;
 
 std::string pkg_loc = ros::package::getPath("lidar_camera_calibration");
@@ -22,273 +21,365 @@ Eigen::Quaterniond rotation_sum;
 Eigen::Matrix3d rotation_avg_by_mult;
 float rmse_avg;
 
-int iteration_counter = 0;
+int iteration_counter=0;
 
-Eigen::Quaterniond addQ(Eigen::Quaterniond a, Eigen::Quaterniond b) {
-    Eigen::Quaterniond retval;
-    if (a.x() * b.x() + a.y() * b.y() + a.z() * b.z() + a.w() * b.w() < 0.0) {
-        b.x() = -b.x();
-        b.y() = -b.y();
-        b.z() = -b.z();
-        b.w() = -b.w();
-    }
-    retval.x() = a.x() + b.x();
-    retval.y() = a.y() + b.y();
-    retval.z() = a.z() + b.z();
-    retval.w() = a.w() + b.w();
-    return retval;
+Eigen::Quaterniond addQ(Eigen::Quaterniond a, Eigen::Quaterniond b)
+{
+	Eigen::Quaterniond retval;
+	if(a.x()*b.x() + a.y()*b.y() + a.z()*b.z() + a.w()*b.w() < 0.0)
+	{
+		b.x() = -b.x();
+		b.y() = -b.y();
+		b.z() = -b.z();
+		b.w() = -b.w();
+	}
+	retval.x() = a.x() + b.x();
+	retval.y() = a.y() + b.y();
+	retval.z() = a.z() + b.z();
+	retval.w() = a.w() + b.w();
+	return retval;
 }
 
-std::pair <MatrixXd, MatrixXd> readArray() {
-    std::ifstream infile(pkg_loc + "/conf/points.txt");
-    int num_points = 0;
+std::pair<MatrixXd, MatrixXd> readArray()
+{
+	std::ifstream infile(pkg_loc + "/conf/points.txt");
+	int num_points=0;
 
-    infile >> num_points;
+	infile >> num_points;
 
-    ROS_ASSERT(num_points > 0);
+	ROS_ASSERT(num_points > 0);
+	
+	MatrixXd lidar(3,num_points), camera(3,num_points);
+	
+	std::cout << "Num points is:" << num_points << std::endl;
+	
+	for(int i=0; i<num_points; i++)
+	{
+		infile >> lidar(0,i) >> lidar(1,i) >> lidar(2,i);
+	}
+	for(int i=0; i<num_points; i++)
+	{
+		infile >> camera(0,i) >> camera(1,i) >> camera(2,i);
+	}
+	infile.close();
 
-    MatrixXd lidar(3, num_points), camera(3, num_points);
-
-    std::cout << "Num points is:" << num_points << std::endl;
-
-    for (int i = 0; i < num_points; i++) {
-        infile >> lidar(0, i) >> lidar(1, i) >> lidar(2, i);
-    }
-    for (int i = 0; i < num_points; i++) {
-        infile >> camera(0, i) >> camera(1, i) >> camera(2, i);
-    }
-    infile.close();
-
-    // camera values are stored in variable 'lidar' and vice-versa
-    // need to change this
-    return std::pair<MatrixXd, MatrixXd>(lidar, camera);
-    //return std::pair<MatrixXd, MatrixXd>(camera, lidar);
+	// camera values are stored in variable 'lidar' and vice-versa
+	// need to change this
+	return std::pair<MatrixXd, MatrixXd>(lidar, camera);
+	//return std::pair<MatrixXd, MatrixXd>(camera, lidar);
 }
 
 // calculates rotation and translation that transforms points in the lidar frame to the camera frame
-Matrix4d calc_RT(MatrixXd lidar, MatrixXd camera, int MAX_ITERS, Eigen::Matrix3d lidarToCamera) {
-    if (iteration_counter == 0) {
-        std::ofstream clean_file(pkg_loc + "/log/avg_values.txt", std::ios_base::trunc);
-        clean_file.close();
+//第一个参数是激光雷达的点云坐标
+//camera 是相机坐标系下的3维点坐标
+//MAX_ITERS没有用到!!!!
+//lidarToCamera是初始值设置的旋转矩阵
+Matrix4d calc_RT(MatrixXd lidar, MatrixXd camera, int MAX_ITERS, Eigen::Matrix3d lidarToCamera)
+{
+	if(iteration_counter == 0)
+	{
+		std::ofstream clean_file(pkg_loc + "/log/avg_values.txt", std::ios_base::trunc);//打开文件,若文件已存在那么,清空文件内容
+		clean_file.close();
 
-        translation_sum << 0.0, 0.0, 0.0;
-        rotation_sum = Quaterniond(0.0, 0.0, 0.0, 0.0);
-        rotation_avg_by_mult << 1.0, 0.0, 0.0,
-                0.0, 1.0, 0.0,
-                0.0, 0.0, 1.0;
-        rmse_avg = 0.0;
-    }
-    int num_points = lidar.cols();
-    std::cout << "Number of points: " << num_points << std::endl;
-    Vector3d mu_lidar, mu_camera;
+		translation_sum << 0.0, 0.0, 0.0; 
+		rotation_sum = Quaterniond(0.0, 0.0, 0.0, 0.0);
+		rotation_avg_by_mult << 1.0, 0.0, 0.0, 
+								0.0, 1.0, 0.0, 
+								0.0, 0.0, 1.0;
+		rmse_avg = 0.0;
+	}
+	int num_points = lidar.cols();
+	std::cout << "Number of points: " << num_points << std::endl;
+	Vector3d mu_lidar, mu_camera;
+	
+	mu_lidar << 0.0, 0.0, 0.0;
+	mu_camera << 0.0, 0.0, 0.0;
 
-    mu_lidar << 0.0, 0.0, 0.0;
-    mu_camera << 0.0, 0.0, 0.0;
+	for(int i=0; i<num_points; i++)
+	{
+		mu_lidar(0) += lidar(0,i);
+		mu_lidar(1) += lidar(1,i);
+		mu_lidar(2) += lidar(2,i);
+	}
+	for(int i=0; i<num_points; i++)
+	{
+		mu_camera(0) += camera(0,i);
+		mu_camera(1) += camera(1,i);
+		mu_camera(2) += camera(2,i);
+	}
 
-    for (int i = 0; i < num_points; i++) {
-        mu_lidar(0) += lidar(0, i);
-        mu_lidar(1) += lidar(1, i);
-        mu_lidar(2) += lidar(2, i);
-    }
-    for (int i = 0; i < num_points; i++) {
-        mu_camera(0) += camera(0, i);
-        mu_camera(1) += camera(1, i);
-        mu_camera(2) += camera(2, i);
-    }
+	mu_lidar = mu_lidar/num_points;
+	mu_camera = mu_camera/num_points;
 
-    mu_lidar = mu_lidar / num_points;
-    mu_camera = mu_camera / num_points;
+	if(iteration_counter == 0)
+	{
+		std::cout << "mu_lidar: \n" << mu_lidar << std::endl;
+		std::cout << "mu_camera: \n" << mu_camera << std::endl;
+	}
 
-    if (iteration_counter == 0) {
-        std::cout << "mu_lidar: \n" << mu_lidar << std::endl;
-        std::cout << "mu_camera: \n" << mu_camera << std::endl;
-    }
+	MatrixXd lidar_centered = lidar.colwise() - mu_lidar;
+	MatrixXd camera_centered = camera.colwise() - mu_camera;
 
-    MatrixXd lidar_centered = lidar.colwise() - mu_lidar;
-    MatrixXd camera_centered = camera.colwise() - mu_camera;
+	if(iteration_counter == 0)
+	{
+		std::cout << "lidar_centered: \n" << lidar_centered << std::endl;
+		std::cout << "camera_centered: \n" << camera_centered << std::endl;
+	}
 
-    if (iteration_counter == 0) {
-        std::cout << "lidar_centered: \n" << lidar_centered << std::endl;
-        std::cout << "camera_centered: \n" << camera_centered << std::endl;
-    }
+	Matrix3d cov = camera_centered*lidar_centered.transpose();
 
-    Matrix3d cov = camera_centered * lidar_centered.transpose();
+	std::cout << cov << std::endl;
 
-    std::cout << cov << std::endl;
+	JacobiSVD<MatrixXd> svd(cov, ComputeFullU | ComputeFullV);
 
-    JacobiSVD <MatrixXd> svd(cov, ComputeFullU | ComputeFullV);
+	Matrix3d rotation;
+	rotation = svd.matrixU() * svd.matrixV().transpose();
+	if( rotation.determinant() < 0 )
+	{
+		Vector3d diag_correct;
+		diag_correct << 1.0, 1.0, -1.0; 
 
-    Matrix3d rotation;
-    rotation = svd.matrixU() * svd.matrixV().transpose();
-    if (rotation.determinant() < 0) {
-        Vector3d diag_correct;
-        diag_correct << 1.0, 1.0, -1.0;
+		rotation = svd.matrixU() * diag_correct.asDiagonal() * svd.matrixV().transpose();
+	}
+	
+	Vector3d translation = mu_camera - rotation*mu_lidar;
+       //我们已经计算得到了rotation 和 translation
+	// averaging translation and rotation
+	translation_sum += translation;
+	Quaterniond temp_q(rotation);
+	rotation_sum = addQ(rotation_sum, temp_q);
 
-        rotation = svd.matrixU() * diag_correct.asDiagonal() * svd.matrixV().transpose();
-    }
+	// averaging rotations by multiplication
+	//这个参数只计算了没有用到
+	rotation_avg_by_mult = rotation_avg_by_mult.pow(1.0*iteration_counter/(iteration_counter+1))*rotation.pow(1.0/(iteration_counter+1));
 
-    Vector3d translation = mu_camera - rotation * mu_lidar;
+	Vector3d ea = rotation.eulerAngles(2, 1, 0);
 
-    // averaging translation and rotation
-    translation_sum += translation;
-    Quaterniond temp_q(rotation);
-    rotation_sum = addQ(rotation_sum, temp_q);
+	std::cout << "Rotation matrix: \n" << rotation << std::endl;
+	std::cout << "Rotation in Euler angles: \n" << ea*57.3 << std::endl;
+	std::cout << "Translation: \n" << translation << std::endl;
 
-    // averaging rotations by multiplication
-    rotation_avg_by_mult = rotation_avg_by_mult.pow(1.0 * iteration_counter / (iteration_counter + 1)) *
-                           rotation.pow(1.0 / (iteration_counter + 1));
+	MatrixXd eltwise_error = (camera - ((rotation*lidar).colwise() + translation)).array().square().colwise().sum();
+	double error = sqrt(eltwise_error.sum()/num_points);//计算得到的RMSE残差
+	std::cout << "RMSE: " << error << std::endl;
 
-    Vector3d ea = rotation.eulerAngles(2, 1, 0);
+	rmse_avg = rmse_avg + error;
 
-    std::cout << "Rotation matrix: \n" << rotation << std::endl;
-    std::cout << "Rotation in Euler angles: \n" << ea * 57.3 << std::endl;
-    std::cout << "Translation: \n" << translation << std::endl;
+	Matrix4d T;
+	T.setIdentity(4,4);
+	T.topLeftCorner(3, 3) = rotation;
+	T.col(3).head(3) = translation;
 
-    MatrixXd eltwise_error = (camera - ((rotation * lidar).colwise() + translation)).array().square().colwise().sum();
-    double error = sqrt(eltwise_error.sum() / num_points);
-    std::cout << "RMSE: " << error << std::endl;
+	std::cout << "Rigid-body transformation: \n" << T << std::endl;
 
-    rmse_avg = rmse_avg + error;
+	iteration_counter++;//就这里对iteration_counter值进行了更新
+	//if(iteration_counter == MAX_ITERS)
+	if(iteration_counter%1 == 0)
+	{
+		std::ofstream log_avg_values(pkg_loc + "/log/avg_values.txt", std::ios_base::app);
 
-    Matrix4d T;
-    T.setIdentity(4, 4);
-    T.topLeftCorner(3, 3) = rotation;
-    T.col(3).head(3) = translation;
-
-    std::cout << "Rigid-body transformation: \n" << T << std::endl;
-
-    iteration_counter++;
-
-    if (iteration_counter % 1 == 0) {
-        std::ofstream log_avg_values(pkg_loc + "/log/avg_values.txt", std::ios_base::app);
-
-        std::cout << "--------------------------------------------------------------------\n";
-        std::cout << "After " << iteration_counter << " iterations\n";
-        std::cout << "--------------------------------------------------------------------\n";
-
-        std::cout << "Average translation is:" << "\n" << translation_sum / iteration_counter << "\n";
-        log_avg_values << iteration_counter << "\n";
-        log_avg_values << translation_sum / iteration_counter << "\n";
+		std::cout << "--------------------------------------------------------------------\n";
+		std::cout << "After " << iteration_counter << " iterations\n";
+		std::cout << "--------------------------------------------------------------------\n";
+		
+		std::cout << "Average translation is:" << "\n" << translation_sum/iteration_counter << "\n";
+		log_avg_values << iteration_counter << "\n";
+		log_avg_values << translation_sum/iteration_counter << "\n";
 
 
-        rotation_sum.x() = rotation_sum.x() / iteration_counter;
-        rotation_sum.y() = rotation_sum.y() / iteration_counter;
-        rotation_sum.z() = rotation_sum.z() / iteration_counter;
-        rotation_sum.w() = rotation_sum.w() / iteration_counter;
-        double mag = sqrt(rotation_sum.x() * rotation_sum.x() +
-                          rotation_sum.y() * rotation_sum.y() +
-                          rotation_sum.z() * rotation_sum.z() +
-                          rotation_sum.w() * rotation_sum.w());
-        rotation_sum.x() = rotation_sum.x() / mag;
-        rotation_sum.y() = rotation_sum.y() / mag;
-        rotation_sum.z() = rotation_sum.z() / mag;
-        rotation_sum.w() = rotation_sum.w() / mag;
+		rotation_sum.x() = rotation_sum.x()/iteration_counter;
+		rotation_sum.y() = rotation_sum.y()/iteration_counter;
+		rotation_sum.z() = rotation_sum.z()/iteration_counter;
+		rotation_sum.w() = rotation_sum.w()/iteration_counter;
+		double mag = sqrt(rotation_sum.x()*rotation_sum.x() +
+					 rotation_sum.y()*rotation_sum.y() +
+					 rotation_sum.z()*rotation_sum.z() +
+					 rotation_sum.w()*rotation_sum.w());
+		rotation_sum.x() = rotation_sum.x()/mag;
+		rotation_sum.y() = rotation_sum.y()/mag;
+		rotation_sum.z() = rotation_sum.z()/mag;
+		rotation_sum.w() = rotation_sum.w()/mag;
 
-        Eigen::Matrix3d rotation_avg = rotation_sum.toRotationMatrix();
-        std::cout << "Average rotation is:" << "\n" << rotation_avg << "\n";
-        Eigen::Matrix3d final_rotation = rotation_avg * lidarToCamera;
-        Eigen::Vector3d final_angles = final_rotation.eulerAngles(2, 1, 0);
+		Eigen::Matrix3d rotation_avg = rotation_sum.toRotationMatrix();
+		std::cout << "Average rotation is:" << "\n" << rotation_avg << "\n";
+		Eigen::Matrix3d final_rotation = rotation_avg * lidarToCamera;//为什么要用初始值,因为我们之前将激光点云做了一个变换
+		Eigen::Vector3d final_angles = final_rotation.eulerAngles(2, 1, 0);
 
-        log_avg_values << std::fixed << std::setprecision(8)
-                       << rotation_avg(0, 0) << " " << rotation_avg(0, 1) << " " << rotation_avg(0, 2) << "\n"
-                       << rotation_avg(1, 0) << " " << rotation_avg(1, 1) << " " << rotation_avg(1, 2) << "\n"
-                       << rotation_avg(2, 0) << " " << rotation_avg(2, 1) << " " << rotation_avg(2, 2) << "\n";
+		//std::cout << "Average rotation by multiplication is:" << "\n" << rotation_avg_by_mult << "\n";
 
-        Matrix4d T;
-        T.setIdentity(4, 4);
-        T.topLeftCorner(3, 3) = rotation_avg;
-        T.col(3).head(3) = translation_sum / iteration_counter;
-        std::cout << "Average transformation is: \n" << T << "\n";
-        std::cout << "Final rotation is:" << "\n" << final_rotation << "\n";
-        std::cout << "Final ypr is:" << "\n" << final_angles << "\n";
+		/*std::cout      << rotation_avg(0,0) << " " << rotation_avg(0,1) << " " << rotation_avg(0,2) << "\n"
+					   << rotation_avg(1,0) << " " << rotation_avg(1,1) << " " << rotation_avg(1,2) << "\n"
+					   << rotation_avg(2,0) << " " << rotation_avg(2,1) << " " << rotation_avg(2,2) << "\n";*/
 
-        std::cout << "Average RMSE is: " << rmse_avg * 1.0 / iteration_counter << "\n";
+		log_avg_values << std::fixed << std::setprecision(8)
+						<< rotation_avg(0,0) << " " << rotation_avg(0,1) << " " << rotation_avg(0,2) << "\n"
+					   << rotation_avg(1,0) << " " << rotation_avg(1,1) << " " << rotation_avg(1,2) << "\n"
+					   << rotation_avg(2,0) << " " << rotation_avg(2,1) << " " << rotation_avg(2,2) << "\n";
 
-        MatrixXd eltwise_error_temp = (camera - ((rotation_avg * lidar).colwise() + (translation_sum /
-                                                                                     iteration_counter))).array().square().colwise().sum();
-        double error_temp = sqrt(eltwise_error_temp.sum() / num_points);
+		Matrix4d T;
+		T.setIdentity(4,4);
+		T.topLeftCorner(3, 3) = rotation_avg;
+		T.col(3).head(3) = translation_sum/iteration_counter;
+		std::cout << "Average transformation is: \n" << T << "\n";
+		std::cout << "Final rotation is:" << "\n" << final_rotation << "\n";
+		std::cout << "Final ypr is:" << "\n" <<final_angles << "\n";
 
-        std::cout << "RMSE on average transformation is: " << error_temp << std::endl;
-        log_avg_values << std::fixed << std::setprecision(8) << error_temp << "\n";
+		std::cout << "Average RMSE is: " <<  rmse_avg*1.0/iteration_counter << "\n";
 
-    }
+		MatrixXd eltwise_error_temp = (camera - ((rotation_avg*lidar).colwise() + (translation_sum/iteration_counter))).array().square().colwise().sum();
+		double error_temp = sqrt(eltwise_error_temp.sum()/num_points);
+		
+		std::cout << "RMSE on average transformation is: " << error_temp << std::endl;
+		log_avg_values << std::fixed << std::setprecision(8) << error_temp << "\n";
 
-    return T;
+ 	}
+
+ 	//writing files to generate plots
+ 	
+ 	/*if(iteration_counter%1 == 0)
+	{
+		std::ofstream log_avg_values(pkg_loc + "/log/avg_values.txt", std::ios_base::app);
+
+		log_avg_values << iteration_counter << "\n";
+		log_avg_values << translation_sum/iteration_counter << "\n";
+
+		double mag = sqrt(rotation_sum.x()*rotation_sum.x() +
+					 rotation_sum.y()*rotation_sum.y() +
+					 rotation_sum.z()*rotation_sum.z() +
+					 rotation_sum.w()*rotation_sum.w());
+
+		Eigen::Quaterniond rot_temp_sum;
+		rot_temp_sum.x() = rotation_sum.x()/(mag*iteration_counter);
+		rot_temp_sum.y() = rotation_sum.y()/(mag*iteration_counter);
+		rot_temp_sum.z() = rotation_sum.z()/(mag*iteration_counter);
+		rot_temp_sum.w() = rotation_sum.w()/(mag*iteration_counter);
+		
+		Eigen::Matrix3d rotation_avg = rot_temp_sum.toRotationMatrix();
+		//log_avg_values << rotation_avg << "\n";
+
+		log_avg_values << std::fixed << std::setprecision(8)
+						<< rotation_avg(0,0) << " " << rotation_avg(0,1) << " " << rotation_avg(0,2) << "\n"
+					   << rotation_avg(1,0) << " " << rotation_avg(1,1) << " " << rotation_avg(1,2) << "\n"
+					   << rotation_avg(2,0) << " " << rotation_avg(2,1) << " " << rotation_avg(2,2) << "\n";
+
+		MatrixXd eltwise_error_temp = (camera - ((rotation_avg*lidar).colwise() + (translation_sum/iteration_counter))).array().square().colwise().sum();
+		double error_temp = sqrt(eltwise_error_temp.sum()/num_points);
+		log_avg_values << std::fixed << std::setprecision(8) << error_temp << "\n";
+
+		log_avg_values.close();
+ 	}*/
+ 	
+
+
+	return T; 
+}
+
+//根据aruco_mapping节点得到的相机外参和标定板上的尺寸信息，得到四个角点在相机坐标系下的坐标
+void readArucoPose(std::vector<float> marker_info, int num_of_marker_in_config)
+{
+	std::vector<Matrix4d> marker_pose;
+
+	ROS_ASSERT(marker_info.size()/7 == num_of_marker_in_config);
+
+	int j=0;
+	for(int i = 0; i < marker_info.size()/7; i++)//遍历不同的aruco marker的板子，主要是为了得到不同标定板的外参矩阵，这个矩阵能将标定板坐标系下的点变换到相机坐标系下
+	{
+
+		//std::cout << "In readArucoPose(): " << std::endl;
+		
+		Vector3d trans, rot;
+		int marker_id = marker_info[j++];
+		trans(0) = marker_info[j++];
+		trans(1) = marker_info[j++];
+		trans(2) = marker_info[j++];
+		rot(0) = marker_info[j++];
+		rot(1) = marker_info[j++];
+		rot(2) = marker_info[j++];
+
+		//std::cout << "\n" << "Marker id:" << marker_id << "\n" << trans << "\n" << rot << std::endl;
+
+		
+		Transform<double,3,Affine> aa;
+		aa = AngleAxis<double>(rot.norm(), rot/rot.norm());
+
+		Matrix4d g;
+		g.setIdentity(4,4);
+		//std::cout << "Rot matrix is: \n" << aa*g << std::endl;
+		g = aa*g;
+
+		Matrix4d T;
+		T.setIdentity(4,4);
+		T.topLeftCorner(3, 3) = g.topLeftCorner(3,3);//.transpose();
+		T.col(3).head(3) = trans;
+
+		marker_pose.push_back(T);//这就使我们得到的相机外参
+
+		//std::cout << "transformation matrix is: \n" << T << std::endl;
+	}
+
+
+	//std::vector<std::vector<std::pair<float, float> > > marker_coordinates;
+	std::ifstream infile(pkg_loc + "/conf/marker_coordinates.txt");
+	std::ofstream outfile(pkg_loc + "/conf/points.txt", std::ios_base::app);
+
+	int num_of_markers;
+	infile >> num_of_markers;
+       //根据aruco marker尺寸信息和位姿数据，得到标定板上的四个角点在相机坐标系下的坐标
+	for(int i=0; i<num_of_markers; i++)
+	{
+		float temp;
+		std::vector<float> board;
+		//std::vector<std::pair<float, float> > corner_points;
+		for(int j=0; j<5; j++)
+		{
+			infile >> temp;
+			board.push_back(temp/100.0);
+		}
+		float la, ba;
+		la=board[4]/2+board[2];
+    		ba=board[4]/2+board[3];
+
+	    	/*corner_points.push_back(std::make_pair(ba, 		   board[0]-la));
+	    	corner_points.push_back(std::make_pair(ba-board[1], board[0]-la));
+	    	corner_points.push_back(std::make_pair(ba-board[1], -la 		  ));
+	    	corner_points.push_back(std::make_pair(ba, 		   -la 		  ));*/
+
+	    	Matrix4d points_board;//标定板的四个角点在标定板坐标系下的坐标，这里要注意了标定板认为y轴是0
+	    	points_board << ba, 		 0, board[0]-la, 1,
+	    					ba-board[1], 0, board[0]-la, 1,
+	    					ba-board[1], 0, -la, 		 1,
+	    					ba, 		 0, -la, 		 1;
+
+    		/*std::cout << "Points in before transform: \n" << points_board << std::endl;*/
+
+    		points_board = marker_pose[i]*(points_board.transpose());//非常重要的一步:将标定板下的坐标变换到相机坐标系下了
+
+	    	/*std::cout << "Board number: " << i+1 << "\n";
+	    	std::cout << "P1: " << ba << " " << board[0]-la << "\n";
+	    	std::cout << "P2: " << ba-board[1] << " " << board[0]-la << "\n";
+	    	std::cout << "P3: " << ba-board[1] << " " << -la << "\n";
+	    	std::cout << "P4: " << ba << " " << -la << "\n\n";
+
+	    	std::cout << "Points in camera frame: \n" << points_board << std::endl;*/
+
+	    	//marker_coordinates.push_back(corner_points);
+
+    	
+	    	for(int k=0; k < 4; k++)
+	    	{
+	    		outfile << points_board(0,k) << " " << points_board(1,k) << " " << points_board(2,k) <<  "\n";
+	    	}
+	    	
+	}
+	outfile.close();
+	infile.close();
 }
 
 
-void readArucoPose(std::vector<float> marker_info, int num_of_marker_in_config) {
-    std::vector <Matrix4d> marker_pose;
-
-    ROS_ASSERT(marker_info.size() / 7 == num_of_marker_in_config);
-
-    int j = 0;
-    for (int i = 0; i < marker_info.size() / 7; i++) {
-
-        Vector3d trans, rot;
-        int marker_id = marker_info[j++];
-        trans(0) = marker_info[j++];
-        trans(1) = marker_info[j++];
-        trans(2) = marker_info[j++];
-        rot(0) = marker_info[j++];
-        rot(1) = marker_info[j++];
-        rot(2) = marker_info[j++];
-
-        Transform<double, 3, Affine> aa;
-        aa = AngleAxis<double>(rot.norm(), rot / rot.norm());
-
-        Matrix4d g;
-        g.setIdentity(4, 4);
-        g = aa * g;
-
-        Matrix4d T;
-        T.setIdentity(4, 4);
-        T.topLeftCorner(3, 3) = g.topLeftCorner(3, 3);//.transpose();
-        T.col(3).head(3) = trans;
-
-        marker_pose.push_back(T);
-
-    }
-
-
-    std::ifstream infile(pkg_loc + "/conf/marker_coordinates.txt");
-    std::ofstream outfile(pkg_loc + "/conf/points.txt", std::ios_base::app);
-
-    int num_of_markers;
-    infile >> num_of_markers;
-
-    for (int i = 0; i < num_of_markers; i++) {
-        float temp;
-        std::vector<float> board;
-        for (int j = 0; j < 5; j++) {
-            infile >> temp;
-            board.push_back(temp / 100.0);
-        }
-        float la, ba;
-        la = board[4] / 2 + board[2];
-        ba = board[4] / 2 + board[3];
-
-        Matrix4d points_board;
-        points_board << ba, 0, board[0] - la, 1,
-                ba - board[1], 0, board[0] - la, 1,
-                ba - board[1], 0, -la, 1,
-                ba, 0, -la, 1;
-
-        points_board = marker_pose[i] * (points_board.transpose());
-
-        for (int k = 0; k < 4; k++) {
-            outfile << points_board(0, k) << " " << points_board(1, k) << " " << points_board(2, k) << "\n";
-        }
-
-    }
-    outfile.close();
-    infile.close();
-}
-
-
-void find_transformation(std::vector<float> marker_info, int num_of_marker_in_config, int MAX_ITERS,
-                         Eigen::Matrix3d lidarToCamera) {
-    readArucoPose(marker_info, num_of_marker_in_config);
-    std::pair <MatrixXd, MatrixXd> point_clouds = readArray();
-    Matrix4d T = calc_RT(point_clouds.first, point_clouds.second, MAX_ITERS, lidarToCamera);
+//
+void find_transformation(std::vector<float> marker_info, int num_of_marker_in_config, int MAX_ITERS, Eigen::Matrix3d lidarToCamera)
+{
+	readArucoPose(marker_info, num_of_marker_in_config); ///根据aruco_mapping节点得到的相机外参和标定板上的尺寸信息，得到四个角点在相机坐标系下的坐标,并写入到points.txt文件中
+	std::pair<MatrixXd, MatrixXd> point_clouds = readArray();//读取points.txt文件，得到icp对应的三维点坐标，在这个文件中先是四个角点在雷达坐标系下的坐标，然后是四个角点在相机坐标系下的坐标
+	Matrix4d T = calc_RT(point_clouds.first, point_clouds.second, MAX_ITERS, lidarToCamera);
 }

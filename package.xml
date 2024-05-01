@@ -21,7 +21,6 @@
   <build_depend>image_geometry</build_depend>
   <build_depend>velodyne_msgs</build_depend>
   <build_depend>velodyne_pointcloud</build_depend>
-  <build_depend>velodyne_pcl</build_depend>
   <build_depend>pcl_ros</build_depend>
 
 
@@ -33,7 +32,6 @@
   <run_depend>image_geometry</run_depend>
   <run_depend>velodyne_msgs</run_depend>
   <run_depend>velodyne_pointcloud</run_depend>
-  <run_depend>velodyne_pcl</run_depend>
   <run_depend>pcl_ros</run_depend>
 
 </package>
